@@ -10,6 +10,7 @@
 #define PARTICLE_FILTER_H_
 
 #include "helper_functions.h"
+#include "map.h"
 
 struct Particle {
 
@@ -45,7 +46,7 @@ public:
 
 	// Constructor
 	// @param num_particles Number of particles
-	ParticleFilter() : num_particles(0), is_initialized(false) {}
+	ParticleFilter(): num_particles(0), is_initialized(false) {}
 
 	// Destructor
 	~ParticleFilter() {}
@@ -78,7 +79,7 @@ public:
 	 * @param predicted Vector of predicted landmark observations
 	 * @param observations Vector of landmark observations
 	 */
-	void dataAssociation(std::vector<LandmarkObs> predicted, std::vector<LandmarkObs>& observations);
+	void dataAssociation(std::vector<Map::single_landmark_s> landMarks, std::vector<LandmarkObs>& transObservations);
 	
 	/**
 	 * updateWeights Updates the weights for each particle based on the likelihood of the 
@@ -90,6 +91,8 @@ public:
 	 */
 	void updateWeights(double sensor_range, double std_landmark[], const std::vector<LandmarkObs> &observations,
 			const Map &map_landmarks);
+
+	double gaussian_prob(float meanx, float meany, double x, double y, double std_landmark[]);
 	
 	/**
 	 * resample Resamples from the updated set of particles to form

@@ -15,15 +15,39 @@
 #include <string>
 #include <iterator>
 
+
 #include "particle_filter.h"
 
 using namespace std;
+
+static default_random_engine gen;
 
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// TODO: Set the number of particles. Initialize all particles to first position (based on estimates of 
 	//   x, y, theta and their uncertainties from GPS) and all weights to 1. 
 	// Add random Gaussian noise to each particle.
 	// NOTE: Consult particle_filter.h for more information about this method (and others in this file).
+
+	is_initialized = true;
+	num_particles = 200;
+	
+	// This line creates a normal (Gaussian) distribution for x
+	normal_distribution<double> dist_x(x, std[0]);
+	normal_distribution<double> dist_y(y, std[1]);
+	normal_distribution<double> dist_theta(theta, std[2]);
+
+	
+	for(int i = 0; i< num_particles; i++){
+		Particle p;
+		p.id = i;
+		p.x = dist_x(gen);
+		p.y = dist_y(gen);
+		p.theta = dist_theta(gen);
+		p.weight = 1.0;
+        
+        particles.push_back(p);
+
+	}
 
 }
 
@@ -32,15 +56,63 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	// NOTE: When adding noise you may find std::normal_distribution and std::default_random_engine useful.
 	//  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
 	//  http://www.cplusplus.com/reference/random/default_random_engine/
+	
+	// This line creates a normal (Gaussian) distribution for x
+	normal_distribution<double> dist_x(0, std_pos[0]);
+	normal_distribution<double> dist_y(0, std_pos[1]);
+	normal_distribution<double> dist_theta(0, std_pos[2]);
+	//avoid division by zero
+	for(int i=0; i<num_particles; i++){
+		if (fabs(yaw_rate) > 0.001) {
+	        particles[i].x  +=  velocity/yaw_rate * ( sin (particles[i].theta + yaw_rate*delta_t) - sin(particles[i].theta));
+	        particles[i].y  +=  velocity/yaw_rate * ( cos (particles[i].theta) - cos(particles[i].theta + yaw_rate*delta_t));
+	    }
+	    else {
+	       particles[i].x  += velocity* delta_t* cos(particles[i].theta);
+	       particles[i].y  += velocity* delta_t* sin(particles[i].theta);
+	    }
+
+	    particles[i].theta += yaw_rate*particles[i].theta;
+		
+		// adding noise
+		particles[i].x += dist_x(gen);
+		particles[i].y += dist_y(gen);
+		particles[i].theta += dist_theta(gen);
+	}
+   
 
 }
 
-void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::vector<LandmarkObs>& observations) {
+void ParticleFilter::dataAssociation(std::vector<Map::single_landmark_s> landMarks, std::vector<LandmarkObs>& transObservations) {
 	// TODO: Find the predicted measurement that is closest to each observed measurement and assign the 
 	//   observed measurement to this particular landmark.
 	// NOTE: this method will NOT be called by the grading code. But you will probably find it useful to 
 	//   implement this method and use it as a helper during the updateWeights phase.
+    for(int i =0; i < transObservations.size();i++){
+        
+        double tx = transObservations[i].x;
+        double ty = transObservations[i].y;
 
+        double min = 999999.0;
+        int id = 0;
+  
+    	for(int j = 0 ; j < landMarks.size();j++){
+          
+          double lx = landMarks[i].x_f;
+          double ly = landMarks[i].y_f;
+
+          if(dist(tx, ty, lx, ly) < min){
+          	min = dist(tx, ty, lx, ly);
+          	id = landMarks[i].id_i;
+          }
+    	}
+
+    	transObservations[i].id = id;
+    }
+}
+
+double ParticleFilter::gaussian_prob(float meanx, float meany, double x, double y, double std_landmark[]){
+	return ( 1/(2*M_PI*std_landmark[0]*std_landmark[1]) ) * exp(-( (pow(x-meanx,2) / (2*pow(std_landmark[0],2)) ) +( pow(y-meany,2) / (2*pow(std_landmark[1],2)) )));
 }
 
 void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], 
@@ -55,12 +127,70 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   and the following is a good resource for the actual equation to implement (look at equation 
 	//   3.33
 	//   http://planning.cs.uiuc.edu/node99.html
+
+
+	for(int i =0; i<num_particles; i++){
+		double xp = particles[i].x;
+		double yp = particles[i].y;
+		double thetap = particles[i].theta;
+
+		std::vector<LandmarkObs> transformed;
+		for(int j =0; j < observations.size(); j++){
+			double xm = xp + (cos(thetap) * observations[i].x) - (sin(thetap) * observations[i].y);
+			double ym = yp + (sin(thetap) * observations[i].x) + (cos(thetap) * observations[i].y);
+			transformed.push_back({observations[j].id,xm,ym});
+		}
+        
+        std::vector<Map::single_landmark_s> landMarks;
+        for(int j =0; j<map_landmarks.landmark_list.size(); j++){
+            float lmx = map_landmarks.landmark_list[j].x_f;
+            float lmy = map_landmarks.landmark_list[j].y_f;
+
+            if(dist(xp, yp, lmx, lmy) <= sensor_range){
+            	landMarks.push_back(map_landmarks.landmark_list[j]);
+            }
+        }
+
+        dataAssociation(landMarks, transformed);
+        
+        particles[i].weight = 1.0;
+
+        for(int j =0; j<transformed.size(); j++){
+        	double tx = transformed[j].x;
+        	double ty = transformed[j].y;
+
+        	int matching_Landmark_id = transformed[j].id;
+
+        	float lmx,lmy;
+        	for(int k=0; k < landMarks.size(); k++){
+        		if(landMarks[k].id_i == matching_Landmark_id){
+        			lmx = landMarks[k].x_f;
+        			lmy = landMarks[k].y_f;
+        		}
+        	}
+
+        	double w = gaussian_prob(lmx, lmy, tx, ty, std_landmark);
+        	particles[i].weight *= w;
+        }
+
+       weights[i] = particles[i].weight;
+	}
 }
 
 void ParticleFilter::resample() {
 	// TODO: Resample particles with replacement with probability proportional to their weight. 
 	// NOTE: You may find std::discrete_distribution helpful here.
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
+
+	// Vector for new particles
+	vector<Particle> new_particles (num_particles);
+
+	for (int i = 0; i < num_particles; ++i) {
+	    discrete_distribution<int> index(weights.begin(),weights.end());
+	    new_particles[i] = particles[index(gen)];
+    }
+
+    particles = new_particles;
 
 }
 
