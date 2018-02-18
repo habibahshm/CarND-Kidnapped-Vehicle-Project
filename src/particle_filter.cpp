@@ -30,7 +30,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// NOTE: Consult particle_filter.h for more information about this method (and others in this file).
 
 	is_initialized = true;
-	num_particles = 100;
+	num_particles = 10;
 
 	for(int i=0; i < num_particles; i++){
 		weights.push_back(1.0);
